@@ -2,85 +2,287 @@ using UnityEngine;
 
 public class PlayerMovement : MonoBehaviour
 {
+    // =============================================================
+    // MOVEMENT
+    // =============================================================
+
     [Header("Movement")]
     public float moveSpeed;
-    public float climbSpeed;
+
+
+    // =============================================================
+    // JUMP
+    // =============================================================
 
     [Header("Jump")]
     public float minJumpHeight = 1.4f;
     public float maxJumpHeight = 2.7f;
-
-    // Temps pendant lequel le joueur peut augmenter
-    // progressivement la hauteur du saut
     public float maxJumpTime = 0.25f;
-
-    // Coupe la montée lorsque le bouton est relâché
-    // Plus la valeur est basse, plus le saut est coupé
     public float jumpCutMultiplier = 0.5f;
-
-    // Gravité supplémentaire pendant la descente
     public float fallMultiplier = 1.3f;
 
+
+    // =============================================================
+    // DOUBLE JUMP
+    // =============================================================
+
     [Header("Double Jump")]
-public bool canDoubleJump = false;
-public float doubleJumpHeight = 2.16f;
+    public bool canDoubleJump = false;
+    public float doubleJumpHeight = 2.16f;
+    public float doubleJumpHorizontalBoost = 8f;
+    public float doubleJumpBoostTime = 0.12f;
 
-public float doubleJumpHorizontalBoost = 8f;
-public float doubleJumpBoostTime = 0.12f;
-private float doubleJumpBoostTimer = 0f;
-private float doubleJumpDirection = 0f;
-
-private bool hasDoubleJumped = false;
-
+    private float doubleJumpBoostTimer = 0f;
+    private float doubleJumpDirection = 0f;
+    private bool hasDoubleJumped = false;
 
 
-    private bool isGrounded;
-    private bool isJumping;
-    public bool isClimbing;
+    // =============================================================
+    // GROUND CHECK
+    // =============================================================
 
-    private float jumpTimeCounter;
-
+    [Header("Ground Check")]
     public Transform groundCheck;
     public float groundCheckRadius;
     public LayerMask collisionLayers;
 
+    private bool isGrounded;
+
+
+    // =============================================================
+    // WALL CHECK
+    // =============================================================
+
+    [Header("Wall Check")]
+    public Transform wallCheckLeft;
+    public Transform wallCheckRight;
+    public float wallCheckRadius = 0.15f;
+
+    private bool isTouchingWallLeft;
+    private bool isTouchingWallRight;
+    private bool isTouchingWall;
+
+
+    // =============================================================
+    // WALL CLIMB
+    // =============================================================
+
+    [Header("Wall Climb")]
+    public bool canWallClimb = true;
+    public float wallClimbSpeed = 4f;
+
+
+    // =============================================================
+    // WALL HANG
+    // =============================================================
+
+    [Header("Wall Hang")]
+    public float wallHangTime = 2f;
+
+    private float wallHangTimer;
+
+
+    // =============================================================
+    // WALL JUMP
+    // =============================================================
+
+    [Header("Wall Jump")]
+    public float wallJumpHorizontalForce = 12f;
+    public float wallJumpVerticalForce = 13f;
+    public float wallJumpBoostTime = 0.15f;
+
+    private float wallJumpBoostTimer;
+    private float wallJumpDirection;
+
+
+    // =============================================================
+    // PLAYER STATES
+    // =============================================================
+
+    private enum PlayerState
+    {
+        Normal,
+        WallCling,
+        WallJump
+    }
+
+    private PlayerState currentState = PlayerState.Normal;
+
+
+    // =============================================================
+    // REFERENCES
+    // =============================================================
+
+    [Header("References")]
     public Rigidbody2D rb;
     public Animator animator;
     public SpriteRenderer spriteRenderer;
 
+
+    // =============================================================
+    // INTERNAL VARIABLES
+    // =============================================================
+
     private Vector3 velocity = Vector3.zero;
+
     private float horizontaleMovement;
     private float verticalMovement;
 
+    private float jumpTimeCounter;
+
+    private float originalGravityScale;
+
+
+    // =============================================================
+    // AWAKE
+    // =============================================================
+
+    void Awake()
+    {
+        originalGravityScale = rb.gravityScale;
+    }
+
+
+    // =============================================================
+    // UPDATE
+    // =============================================================
 
     void Update()
     {
-        // ==========================================
+        // =========================================================
         // INPUT
-        // ==========================================
+        // =========================================================
 
-        horizontaleMovement = Input.GetAxis("Horizontal") * moveSpeed;
-        verticalMovement = Input.GetAxis("Vertical") * climbSpeed;
+        horizontaleMovement =
+            Input.GetAxis("Horizontal") * moveSpeed;
+
+        verticalMovement =
+            Input.GetAxis("Vertical");
 
 
-        // ==========================================
-        // DEBUT DU SAUT
-        // ==========================================
+        // =========================================================
+        // JUMP INPUT
+        // =========================================================
 
         if (Input.GetButtonDown("Jump"))
-{
-    // ==========================================
-    // PREMIER SAUT
-    // ==========================================
+        {
+            HandleJump();
+        }
 
-    if (isGrounded)
+
+        // =========================================================
+        // VARIABLE JUMP
+        // =========================================================
+
+        HandleVariableJump();
+
+
+        // =========================================================
+        // JUMP RELEASE
+        // =========================================================
+
+        HandleJumpRelease();
+
+
+        // =========================================================
+        // EXTRA GRAVITY
+        // =========================================================
+
+        if (currentState != PlayerState.WallCling &&
+            rb.linearVelocity.y < 0)
+        {
+            rb.linearVelocity +=
+                Vector2.up *
+                Physics2D.gravity.y *
+                (fallMultiplier - 1f) *
+                Time.deltaTime;
+        }
+
+
+        // =========================================================
+        // ANIMATIONS
+        // =========================================================
+
+        Flip(rb.linearVelocity.x);
+
+        float characterVelocity =
+            Mathf.Abs(rb.linearVelocity.x);
+
+        animator.SetFloat(
+            "Speed",
+            characterVelocity
+        );
+
+        animator.SetBool(
+            "isClimbing",
+            currentState == PlayerState.WallCling
+        );
+    }
+
+
+    // =============================================================
+    // HANDLE JUMP
+    // =============================================================
+
+    void HandleJump()
     {
-        isJumping = true;
+        // =========================================================
+        // WALL JUMP
+        // =========================================================
+
+        if (currentState == PlayerState.WallCling &&
+            isTouchingWall)
+        {
+            StartWallJump();
+            return;
+        }
+
+
+        // =========================================================
+        // NORMAL JUMP
+        // =========================================================
+
+        if (currentState == PlayerState.Normal &&
+            isGrounded)
+        {
+            StartNormalJump();
+            return;
+        }
+
+
+        // =========================================================
+        // DOUBLE JUMP
+        // =========================================================
+
+        if (currentState == PlayerState.Normal &&
+            !isGrounded &&
+            canDoubleJump &&
+            !hasDoubleJumped)
+        {
+            StartDoubleJump();
+        }
+    }
+
+
+    // =============================================================
+    // NORMAL JUMP
+    // =============================================================
+
+    void StartNormalJump()
+    {
+        currentState = PlayerState.Normal;
+
         hasDoubleJumped = false;
+
         jumpTimeCounter = maxJumpTime;
 
         float jumpVelocity = Mathf.Sqrt(
-            2f * Mathf.Abs(Physics2D.gravity.y * rb.gravityScale) * minJumpHeight
+            2f *
+            Mathf.Abs(
+                Physics2D.gravity.y *
+                rb.gravityScale
+            ) *
+            minJumpHeight
         );
 
         rb.linearVelocity = new Vector2(
@@ -89,211 +291,503 @@ private bool hasDoubleJumped = false;
         );
     }
 
-    // ==========================================
-    // DOUBLE SAUT
-    // ==========================================
 
-    // DOUBLE SAUT
-else if (canDoubleJump && !hasDoubleJumped)
-{
-    hasDoubleJumped = true;
+    // =============================================================
+    // DOUBLE JUMP
+    // =============================================================
 
-    // Direction du double saut
-    doubleJumpDirection = Input.GetAxisRaw("Horizontal");
-
-    // Si aucune direction n'est appuyée,
-    // on utilise la direction du personnage
-    if (doubleJumpDirection == 0)
+    void StartDoubleJump()
     {
-        doubleJumpDirection = spriteRenderer.flipX ? -1f : 1f;
-    }
+        hasDoubleJumped = true;
 
-    // Active la période de boost
-    doubleJumpBoostTimer = doubleJumpBoostTime;
+        doubleJumpDirection =
+            Input.GetAxisRaw("Horizontal");
 
-    // Calcul de la vitesse verticale
-    float doubleJumpVelocity = Mathf.Sqrt(
-        2f *
-        Mathf.Abs(Physics2D.gravity.y * rb.gravityScale) *
-        doubleJumpHeight
-    );
-
-    // Vraie propulsion horizontale
-    rb.linearVelocity = new Vector2(
-        doubleJumpDirection * doubleJumpHorizontalBoost,
-        doubleJumpVelocity
-    );
-
-    // Pas de maintien du bouton pour ce saut
-    isJumping = false;
-}
-}
-
-
-        // ==========================================
-        // MAINTIEN DU SAUT
-        // ==========================================
-
-        if (Input.GetButton("Jump") && isJumping)
+        if (doubleJumpDirection == 0)
         {
-            if (jumpTimeCounter > 0)
-            {
-                // Progression entre la hauteur minimale
-                // et la hauteur maximale
-                float jumpProgress =
-                    1f - (jumpTimeCounter / maxJumpTime);
-
-                float currentJumpHeight = Mathf.Lerp(
-                    minJumpHeight,
-                    maxJumpHeight,
-                    jumpProgress
-                );
-
-                // Calcul de la vitesse nécessaire
-                // pour atteindre cette hauteur
-                float jumpVelocity = Mathf.Sqrt(
-                    2f *
-                    Mathf.Abs(Physics2D.gravity.y * rb.gravityScale) *
-                    currentJumpHeight
-                );
-
-                // On ne redonne jamais une vitesse supérieure
-                // à celle nécessaire pour la hauteur actuelle
-                if (rb.linearVelocity.y < jumpVelocity)
-                {
-                    rb.linearVelocity = new Vector2(
-                        rb.linearVelocity.x,
-                        jumpVelocity
-                    );
-                }
-
-                jumpTimeCounter -= Time.deltaTime;
-            }
-            else
-            {
-                isJumping = false;
-            }
+            doubleJumpDirection =
+                spriteRenderer.flipX ? -1f : 1f;
         }
 
+        doubleJumpBoostTimer =
+            doubleJumpBoostTime;
 
-        // ==========================================
-        // RELACHEMENT DE LA TOUCHE
-        // ==========================================
+        float doubleJumpVelocity = Mathf.Sqrt(
+            2f *
+            Mathf.Abs(
+                Physics2D.gravity.y *
+                rb.gravityScale
+            ) *
+            doubleJumpHeight
+        );
 
-        if (Input.GetButtonUp("Jump"))
-        {
-            isJumping = false;
-
-            // Si le personnage monte encore,
-            // on réduit sa vitesse verticale.
-            if (rb.linearVelocity.y > 0)
-            {
-                rb.linearVelocity = new Vector2(
-                    rb.linearVelocity.x,
-                    rb.linearVelocity.y * jumpCutMultiplier
-                );
-            }
-        }
-
-
-        // ==========================================
-        // DESCENTE PLUS RAPIDE
-        // ==========================================
-
- if (rb.linearVelocity.y < 0)
-{
-    rb.linearVelocity += Vector2.up
-        * Physics2D.gravity.y
-        * (fallMultiplier - 1f)
-        * Time.deltaTime;
-}
-
-
-        // ==========================================
-        // ANIMATIONS
-        // ==========================================
-
-        Flip(rb.linearVelocity.x);
-
-        float characterVelocity = Mathf.Abs(rb.linearVelocity.x);
-
-        animator.SetFloat("Speed", characterVelocity);
-        animator.SetBool("isClimbing", isClimbing);
+        rb.linearVelocity = new Vector2(
+            doubleJumpDirection *
+            doubleJumpHorizontalBoost,
+            doubleJumpVelocity
+        );
     }
 
+
+    // =============================================================
+    // WALL JUMP
+    // =============================================================
+
+    void StartWallJump()
+    {
+        currentState = PlayerState.WallJump;
+
+        wallHangTimer = 0f;
+
+        rb.gravityScale = originalGravityScale;
+
+        // Détermine la direction opposée au mur
+        if (isTouchingWallLeft)
+        {
+            wallJumpDirection = 1f;
+        }
+        else
+        {
+            wallJumpDirection = -1f;
+        }
+
+        wallJumpBoostTimer =
+            wallJumpBoostTime;
+
+        rb.linearVelocity = new Vector2(
+            wallJumpDirection *
+            wallJumpHorizontalForce,
+            wallJumpVerticalForce
+        );
+    }
+
+
+    // =============================================================
+    // VARIABLE JUMP
+    // =============================================================
+
+    void HandleVariableJump()
+    {
+        // Le saut variable concerne uniquement
+        // le premier saut normal.
+
+        if (currentState != PlayerState.Normal)
+            return;
+
+        if (!Input.GetButton("Jump"))
+            return;
+
+        if (jumpTimeCounter <= 0)
+            return;
+
+        // Si le joueur est au sol et vient de sauter,
+        // le compteur est actif.
+
+        if (rb.linearVelocity.y <= 0)
+            return;
+
+        float jumpProgress =
+            1f -
+            (jumpTimeCounter / maxJumpTime);
+
+        float currentJumpHeight =
+            Mathf.Lerp(
+                minJumpHeight,
+                maxJumpHeight,
+                jumpProgress
+            );
+
+        float jumpVelocity = Mathf.Sqrt(
+            2f *
+            Mathf.Abs(
+                Physics2D.gravity.y *
+                rb.gravityScale
+            ) *
+            currentJumpHeight
+        );
+
+        if (rb.linearVelocity.y < jumpVelocity)
+        {
+            rb.linearVelocity = new Vector2(
+                rb.linearVelocity.x,
+                jumpVelocity
+            );
+        }
+
+        jumpTimeCounter -= Time.deltaTime;
+    }
+
+
+    // =============================================================
+    // JUMP RELEASE
+    // =============================================================
+
+    void HandleJumpRelease()
+    {
+        if (!Input.GetButtonUp("Jump"))
+            return;
+
+        jumpTimeCounter = 0f;
+
+        if (rb.linearVelocity.y > 0)
+        {
+            rb.linearVelocity = new Vector2(
+                rb.linearVelocity.x,
+                rb.linearVelocity.y *
+                jumpCutMultiplier
+            );
+        }
+    }
+
+
+    // =============================================================
+    // FIXED UPDATE
+    // =============================================================
 
     void FixedUpdate()
     {
-        // ==========================================
-        // DETECTION DU SOL
-        // ==========================================
+        // =========================================================
+        // GROUND CHECK
+        // =========================================================
 
         isGrounded = Physics2D.OverlapCircle(
             groundCheck.position,
             groundCheckRadius,
             collisionLayers
         );
-        if (isGrounded)
-{
-    hasDoubleJumped = false;
-}
 
-        MovePlayer(
-            horizontaleMovement,
-            verticalMovement
-        );
+
+        // =========================================================
+        // WALL CHECK
+        // =========================================================
+
+        isTouchingWallLeft =
+            Physics2D.OverlapCircle(
+                wallCheckLeft.position,
+                wallCheckRadius,
+                collisionLayers
+            );
+
+        isTouchingWallRight =
+            Physics2D.OverlapCircle(
+                wallCheckRight.position,
+                wallCheckRadius,
+                collisionLayers
+            );
+
+        isTouchingWall =
+            isTouchingWallLeft ||
+            isTouchingWallRight;
+
+
+        // =========================================================
+        // GROUND RESET
+        // =========================================================
+
+        if (isGrounded)
+        {
+            hasDoubleJumped = false;
+
+            if (currentState != PlayerState.Normal)
+            {
+                currentState = PlayerState.Normal;
+
+                wallHangTimer = 0f;
+                wallJumpBoostTimer = 0f;
+
+                rb.gravityScale =
+                    originalGravityScale;
+            }
+        }
+
+
+        // =========================================================
+        // WALL STATE
+        // =========================================================
+
+        HandleWallState();
+
+
+        // =========================================================
+        // MOVEMENT
+        // =========================================================
+
+        HandleMovement();
     }
 
 
-    void MovePlayer(
-    float _horizontalMovement,
-    float _verticalMovement
-)
-{
-    if (!isClimbing)
+    // =============================================================
+    // WALL STATE
+    // =============================================================
+
+    void HandleWallState()
     {
-        // BOOST DU DOUBLE SAUT
+        // =========================================================
+        // WALL JUMP
+        // =========================================================
+
+        if (currentState == PlayerState.WallJump)
+        {
+            wallJumpBoostTimer -=
+                Time.fixedDeltaTime;
+
+            // Pendant le boost, aucune accroche possible.
+            if (wallJumpBoostTimer > 0)
+            {
+                return;
+            }
+
+            // Le wall jump est terminé.
+            currentState = PlayerState.Normal;
+
+            return;
+        }
+
+
+        // =========================================================
+        // PAS DE WALL CLIMB
+        // =========================================================
+
+        if (!canWallClimb)
+            return;
+
+        if (isGrounded)
+            return;
+
+        if (!isTouchingWall)
+        {
+            // Si on n'est plus contre un mur,
+            // on est forcément en mouvement normal.
+            if (currentState == PlayerState.WallCling)
+            {
+                currentState = PlayerState.Normal;
+
+                rb.gravityScale =
+                    originalGravityScale;
+            }
+
+            return;
+        }
+
+
+        // =========================================================
+        // WALL CLING
+        // =========================================================
+
+        float verticalInput =
+            Input.GetAxisRaw("Vertical");
+
+        float horizontalInput =
+            Input.GetAxisRaw("Horizontal");
+
+
+        // =========================================================
+        // DÉCROCHAGE HORIZONTAL
+        // =========================================================
+
+        bool movingAwayFromLeftWall =
+            isTouchingWallLeft &&
+            horizontalInput > 0;
+
+        bool movingAwayFromRightWall =
+            isTouchingWallRight &&
+            horizontalInput < 0;
+
+        if (movingAwayFromLeftWall ||
+            movingAwayFromRightWall)
+        {
+            LeaveWall();
+            return;
+        }
+
+
+        // =========================================================
+        // ACCROCHAGE AUTOMATIQUE
+        // =========================================================
+
+        if (currentState != PlayerState.WallCling)
+        {
+            currentState = PlayerState.WallCling;
+
+            wallHangTimer =
+                wallHangTime;
+        }
+
+
+        // =========================================================
+        // GRAVITÉ OFF
+        // =========================================================
+
+        rb.gravityScale = 0f;
+
+
+        // =========================================================
+        // MOUVEMENT VERTICAL
+        // =========================================================
+
+        if (verticalInput != 0)
+        {
+            // Le joueur bouge :
+            // le compteur revient à 2 secondes.
+
+            wallHangTimer =
+                wallHangTime;
+        }
+        else
+        {
+            // Aucun mouvement :
+            // le joueur reste accroché mais immobile.
+
+            wallHangTimer -=
+                Time.fixedDeltaTime;
+        }
+
+
+        // =========================================================
+        // TIMEOUT
+        // =========================================================
+
+        if (wallHangTimer <= 0f)
+        {
+            LeaveWall();
+        }
+    }
+
+
+    // =============================================================
+    // LEAVE WALL
+    // =============================================================
+
+    void LeaveWall()
+    {
+        currentState = PlayerState.Normal;
+
+        wallHangTimer = 0f;
+
+        rb.gravityScale =
+            originalGravityScale;
+    }
+
+
+    // =============================================================
+    // MOVEMENT
+    // =============================================================
+
+    void HandleMovement()
+    {
+        // =========================================================
+        // WALL CLING / CLIMB
+        // =========================================================
+
+        if (currentState == PlayerState.WallCling)
+        {
+            float verticalInput =
+                Input.GetAxisRaw("Vertical");
+
+
+            // -----------------------------------------------------
+            // MONTER
+            // -----------------------------------------------------
+
+            if (verticalInput > 0)
+            {
+                rb.linearVelocity = new Vector2(
+                    0f,
+                    wallClimbSpeed
+                );
+
+                return;
+            }
+
+
+            // -----------------------------------------------------
+            // DESCENDRE
+            // -----------------------------------------------------
+
+            if (verticalInput < 0)
+            {
+                rb.linearVelocity = new Vector2(
+                    0f,
+                    -wallClimbSpeed
+                );
+
+                return;
+            }
+
+
+            // -----------------------------------------------------
+            // IMMOBILE
+            // -----------------------------------------------------
+
+            rb.linearVelocity =
+                Vector2.zero;
+
+            return;
+        }
+
+
+        // =========================================================
+        // WALL JUMP BOOST
+        // =========================================================
+
+        if (currentState == PlayerState.WallJump)
+{
+    float progress = wallJumpBoostTimer / wallJumpBoostTime;
+
+    // La poussée diminue progressivement pendant le wall jump
+    float currentHorizontalForce = Mathf.Lerp(0f, wallJumpHorizontalForce, progress);
+
+    rb.linearVelocity = new Vector2(
+        wallJumpDirection * currentHorizontalForce,
+        rb.linearVelocity.y
+    );
+
+    return;
+}
+
+
+        // =========================================================
+        // DOUBLE JUMP BOOST
+        // =========================================================
+
         if (doubleJumpBoostTimer > 0)
         {
-            doubleJumpBoostTimer -= Time.fixedDeltaTime;
+            doubleJumpBoostTimer -=
+                Time.fixedDeltaTime;
 
             rb.linearVelocity = new Vector2(
-                doubleJumpDirection * doubleJumpHorizontalBoost,
+                doubleJumpDirection *
+                doubleJumpHorizontalBoost,
                 rb.linearVelocity.y
             );
 
             return;
         }
 
-        // CONTROLE NORMAL
-        Vector3 targetVelocity = new Vector2(
-            _horizontalMovement,
-            rb.linearVelocity.y
-        );
 
-        rb.linearVelocity = Vector3.SmoothDamp(
-            rb.linearVelocity,
-            targetVelocity,
-            ref velocity,
-            0.03f
-        );
+        // =========================================================
+        // NORMAL MOVEMENT
+        // =========================================================
+
+        Vector3 targetVelocity =
+            new Vector2(
+                horizontaleMovement,
+                rb.linearVelocity.y
+            );
+
+        rb.linearVelocity =
+            Vector3.SmoothDamp(
+                rb.linearVelocity,
+                targetVelocity,
+                ref velocity,
+                0.03f
+            );
     }
-    else
-    {
-        Vector3 targetVelocity = new Vector2(
-            0,
-            _verticalMovement
-        );
 
-        rb.linearVelocity = Vector3.SmoothDamp(
-            rb.linearVelocity,
-            targetVelocity,
-            ref velocity,
-            0.05f
-        );
-    }
-}
 
+    // =============================================================
+    // FLIP
+    // =============================================================
 
     void Flip(float _velocityX)
     {
@@ -308,13 +802,36 @@ else if (canDoubleJump && !hasDoubleJumped)
     }
 
 
+    // =============================================================
+    // GIZMOS
+    // =============================================================
+
     private void OnDrawGizmos()
     {
         Gizmos.color = Color.red;
 
-        Gizmos.DrawWireSphere(
-            groundCheck.position,
-            groundCheckRadius
-        );
+        if (groundCheck != null)
+        {
+            Gizmos.DrawWireSphere(
+                groundCheck.position,
+                groundCheckRadius
+            );
+        }
+
+        if (wallCheckLeft != null)
+        {
+            Gizmos.DrawWireSphere(
+                wallCheckLeft.position,
+                wallCheckRadius
+            );
+        }
+
+        if (wallCheckRight != null)
+        {
+            Gizmos.DrawWireSphere(
+                wallCheckRight.position,
+                wallCheckRadius
+            );
+        }
     }
 }
