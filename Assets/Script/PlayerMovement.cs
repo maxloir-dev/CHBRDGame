@@ -87,12 +87,18 @@ public class PlayerMovement : MonoBehaviour
     // =============================================================
 
     [Header("Wall Jump")]
-    public float wallJumpHorizontalForce = 12f;
-    public float wallJumpVerticalForce = 13f;
+    public float wallJumpHorizontalForce = 10f;
+    public float wallJumpVerticalForce = 14f;
     public float wallJumpBoostTime = 0.15f;
+    public float wallJumpAirControlTime = 0.3f;
+public float wallJumpAirControl = 1f;
+    private bool jumpInputConsumed = false;
+    private bool canNormalJump = true;
+    private bool wallJumpActive = false;
 
     private float wallJumpBoostTimer;
     private float wallJumpDirection;
+    private float wallJumpAirControlTimer;
 
 
     // =============================================================
@@ -163,7 +169,11 @@ public class PlayerMovement : MonoBehaviour
         // =========================================================
         // JUMP INPUT
         // =========================================================
-
+ if (Input.GetButtonUp("Jump"))
+    {
+        jumpInputConsumed = false;
+        wallJumpActive = false;
+    }
         if (Input.GetButtonDown("Jump"))
         {
             HandleJump();
@@ -225,43 +235,59 @@ public class PlayerMovement : MonoBehaviour
     // =============================================================
 
     void HandleJump()
+{
+    Debug.Log(
+        "JUMP INPUT | State: " + currentState +
+        " | Grounded: " + isGrounded +
+        " | TouchingWall: " + isTouchingWall
+    );
+    // =========================================================
+    // BLOQUER LA RÉUTILISATION DU MÊME APPUI
+    // =========================================================
+
+    if (jumpInputConsumed)
     {
-        // =========================================================
-        // WALL JUMP
-        // =========================================================
-
-        if (currentState == PlayerState.WallCling &&
-            isTouchingWall)
-        {
-            StartWallJump();
-            return;
-        }
-
-
-        // =========================================================
-        // NORMAL JUMP
-        // =========================================================
-
-        if (currentState == PlayerState.Normal &&
-            isGrounded)
-        {
-            StartNormalJump();
-            return;
-        }
-
-
-        // =========================================================
-        // DOUBLE JUMP
-        // =========================================================
-
-        if (currentState == PlayerState.Normal &&
-            !isGrounded &&
-            canDoubleJump &&
-            !hasDoubleJumped)
-        {
-            StartDoubleJump();
-        }
+        return;
     }
+
+
+    // =========================================================
+    // WALL JUMP
+    // =========================================================
+
+    if (currentState == PlayerState.WallCling &&
+        isTouchingWall)
+    {
+        StartWallJump();
+        return;
+    }
+
+
+    // =========================================================
+    // NORMAL JUMP
+    // =========================================================
+
+    if (currentState == PlayerState.Normal &&
+    isGrounded &&
+    canNormalJump)
+    {
+        StartNormalJump();
+        return;
+    }
+
+
+    // =========================================================
+    // DOUBLE JUMP
+    // =========================================================
+
+    if (currentState == PlayerState.Normal &&
+        !isGrounded &&
+        canDoubleJump &&
+        !hasDoubleJumped)
+    {
+        StartDoubleJump();
+    }
+}
 
 
     // =============================================================
@@ -270,6 +296,7 @@ public class PlayerMovement : MonoBehaviour
 
     void StartNormalJump()
     {
+        Debug.Log("NORMAL JUMP !");
         currentState = PlayerState.Normal;
 
         hasDoubleJumped = false;
@@ -298,6 +325,7 @@ public class PlayerMovement : MonoBehaviour
 
     void StartDoubleJump()
     {
+        Debug.Log("DOUBLE JUMP !");
         hasDoubleJumped = true;
 
         doubleJumpDirection =
@@ -335,9 +363,13 @@ public class PlayerMovement : MonoBehaviour
 
     void StartWallJump()
     {
+        jumpInputConsumed = true;
+        wallJumpActive = true;
+        canNormalJump = false;
         currentState = PlayerState.WallJump;
 
         wallHangTimer = 0f;
+        jumpTimeCounter = 0f;
 
         rb.gravityScale = originalGravityScale;
 
@@ -353,6 +385,7 @@ public class PlayerMovement : MonoBehaviour
 
         wallJumpBoostTimer =
             wallJumpBoostTime;
+            wallJumpAirControlTimer = wallJumpAirControlTime;
 
         rb.linearVelocity = new Vector2(
             wallJumpDirection *
@@ -370,6 +403,10 @@ public class PlayerMovement : MonoBehaviour
     {
         // Le saut variable concerne uniquement
         // le premier saut normal.
+     if (wallJumpActive)
+{
+    return;
+}
 
         if (currentState != PlayerState.Normal)
             return;
@@ -405,6 +442,11 @@ public class PlayerMovement : MonoBehaviour
             ) *
             currentJumpHeight
         );
+        Debug.Log(
+    "VARIABLE JUMP | State: " + currentState +
+    " | Y: " + rb.linearVelocity.y +
+    " | Counter: " + jumpTimeCounter
+);
 
         if (rb.linearVelocity.y < jumpVelocity)
         {
@@ -424,6 +466,10 @@ public class PlayerMovement : MonoBehaviour
 
     void HandleJumpRelease()
     {
+        if (jumpInputConsumed)
+    {
+        return;
+    }
         if (!Input.GetButtonUp("Jump"))
             return;
 
@@ -455,6 +501,7 @@ public class PlayerMovement : MonoBehaviour
             groundCheckRadius,
             collisionLayers
         );
+        
 
 
         // =========================================================
@@ -484,21 +531,22 @@ public class PlayerMovement : MonoBehaviour
         // GROUND RESET
         // =========================================================
 
-        if (isGrounded)
-        {
-            hasDoubleJumped = false;
+        if (isGrounded && currentState != PlayerState.WallJump)
+{
+    hasDoubleJumped = false;
+    canNormalJump = true;
 
-            if (currentState != PlayerState.Normal)
-            {
-                currentState = PlayerState.Normal;
+    if (currentState != PlayerState.Normal)
+    {
+        currentState = PlayerState.Normal;
 
-                wallHangTimer = 0f;
-                wallJumpBoostTimer = 0f;
+        wallHangTimer = 0f;
+        wallJumpBoostTimer = 0f;
 
-                rb.gravityScale =
-                    originalGravityScale;
-            }
-        }
+        rb.gravityScale =
+            originalGravityScale;
+    }
+}
 
 
         // =========================================================
@@ -511,7 +559,10 @@ public class PlayerMovement : MonoBehaviour
         // =========================================================
         // MOVEMENT
         // =========================================================
-
+if (wallJumpAirControlTimer > 0f)
+{
+    wallJumpAirControlTimer -= Time.fixedDeltaTime;
+}
         HandleMovement();
     }
 
@@ -552,7 +603,9 @@ public class PlayerMovement : MonoBehaviour
             return;
 
         if (isGrounded)
-            return;
+        {
+          
+        }
 
         if (!isTouchingWall)
         {
@@ -730,15 +783,10 @@ public class PlayerMovement : MonoBehaviour
         // WALL JUMP BOOST
         // =========================================================
 
-        if (currentState == PlayerState.WallJump)
+ if (currentState == PlayerState.WallJump)
 {
-    float progress = wallJumpBoostTimer / wallJumpBoostTime;
-
-    // La poussée diminue progressivement pendant le wall jump
-    float currentHorizontalForce = Mathf.Lerp(0f, wallJumpHorizontalForce, progress);
-
     rb.linearVelocity = new Vector2(
-        wallJumpDirection * currentHorizontalForce,
+        wallJumpDirection * wallJumpHorizontalForce,
         rb.linearVelocity.y
     );
 
@@ -769,11 +817,18 @@ public class PlayerMovement : MonoBehaviour
         // NORMAL MOVEMENT
         // =========================================================
 
-        Vector3 targetVelocity =
-            new Vector2(
-                horizontaleMovement,
-                rb.linearVelocity.y
-            );
+        float currentAirControl = 1f;
+
+if (wallJumpAirControlTimer > 0f)
+{
+    currentAirControl = wallJumpAirControl;
+}
+
+Vector3 targetVelocity =
+    new Vector2(
+        horizontaleMovement * currentAirControl,
+        rb.linearVelocity.y
+    );
 
         rb.linearVelocity =
             Vector3.SmoothDamp(
