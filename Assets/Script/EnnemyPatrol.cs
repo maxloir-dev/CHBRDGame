@@ -5,8 +5,11 @@ public class EnnemyPatrol : MonoBehaviour
     public float speed;
     public Transform[] waypoints;
     public SpriteRenderer graphics;
+    public Rigidbody2D rb;
 
     public Transform target;
+    
+    public bool isKnockedBack = false;
     private int desPoint = 0;
 
     // private bool movingRight = true;
@@ -19,6 +22,10 @@ void Start()
 
 void Update()
 {
+    if (isKnockedBack)
+{
+    return;
+}
  Vector3 dir = target.position - transform.position;
  transform.Translate(dir.normalized * speed * Time.deltaTime, Space.World);
 

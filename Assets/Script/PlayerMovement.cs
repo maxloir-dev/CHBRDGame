@@ -70,6 +70,8 @@ public class PlayerMovement : MonoBehaviour
     [Header("Wall Climb")]
     public bool canWallClimb = true;
     public float wallClimbSpeed = 4f;
+    public float wallDetachDelay = 0.1f;
+    private float wallDetachTimer;
 
 
     // =============================================================
@@ -88,17 +90,20 @@ public class PlayerMovement : MonoBehaviour
 
     [Header("Wall Jump")]
     public float wallJumpHorizontalForce = 10f;
-    public float wallJumpVerticalForce = 14f;
+    public float wallJumpVerticalForce = 16f;
     public float wallJumpBoostTime = 0.15f;
-    public float wallJumpAirControlTime = 0.3f;
-public float wallJumpAirControl = 1f;
+    public float wallJumpInertiaDeceleration = 5f;
+    public float wallJumpInertiaBrake = 15f;
+    
+
     private bool jumpInputConsumed = false;
     private bool canNormalJump = true;
     private bool wallJumpActive = false;
 
     private float wallJumpBoostTimer;
     private float wallJumpDirection;
-    private float wallJumpAirControlTimer;
+    private bool wallJumpInertia = false;
+   
 
 
     // =============================================================
@@ -169,11 +174,7 @@ public float wallJumpAirControl = 1f;
         // =========================================================
         // JUMP INPUT
         // =========================================================
- if (Input.GetButtonUp("Jump"))
-    {
-        jumpInputConsumed = false;
-        wallJumpActive = false;
-    }
+
         if (Input.GetButtonDown("Jump"))
         {
             HandleJump();
@@ -192,6 +193,11 @@ public float wallJumpAirControl = 1f;
         // =========================================================
 
         HandleJumpRelease();
+        if (Input.GetButtonUp("Jump"))
+{
+    jumpInputConsumed = false;
+    wallJumpActive = false;
+}
 
 
         // =========================================================
@@ -365,6 +371,7 @@ public float wallJumpAirControl = 1f;
     {
         jumpInputConsumed = true;
         wallJumpActive = true;
+        wallJumpInertia = false;
         canNormalJump = false;
         currentState = PlayerState.WallJump;
 
@@ -385,7 +392,7 @@ public float wallJumpAirControl = 1f;
 
         wallJumpBoostTimer =
             wallJumpBoostTime;
-            wallJumpAirControlTimer = wallJumpAirControlTime;
+            
 
         rb.linearVelocity = new Vector2(
             wallJumpDirection *
@@ -399,14 +406,17 @@ public float wallJumpAirControl = 1f;
     // VARIABLE JUMP
     // =============================================================
 
-    void HandleVariableJump()
-    {
-        // Le saut variable concerne uniquement
-        // le premier saut normal.
-     if (wallJumpActive)
+   void HandleVariableJump()
 {
-    return;
-}
+    if (jumpInputConsumed)
+    {
+        return;
+    }
+
+    if (currentState != PlayerState.Normal)
+        return;
+
+
 
         if (currentState != PlayerState.Normal)
             return;
@@ -535,6 +545,7 @@ public float wallJumpAirControl = 1f;
 {
     hasDoubleJumped = false;
     canNormalJump = true;
+    wallJumpInertia = false;
 
     if (currentState != PlayerState.Normal)
     {
@@ -559,10 +570,7 @@ public float wallJumpAirControl = 1f;
         // =========================================================
         // MOVEMENT
         // =========================================================
-if (wallJumpAirControlTimer > 0f)
-{
-    wallJumpAirControlTimer -= Time.fixedDeltaTime;
-}
+
         HandleMovement();
     }
 
@@ -588,11 +596,18 @@ if (wallJumpAirControlTimer > 0f)
                 return;
             }
 
-            // Le wall jump est terminé.
-            currentState = PlayerState.Normal;
+            wallJumpInertia = true;
+currentState = PlayerState.Normal;
 
-            return;
         }
+        if (wallJumpInertia && isTouchingWall)
+{
+    wallJumpInertia = false;
+    currentState = PlayerState.WallCling;
+    wallHangTimer = wallHangTime;
+    rb.gravityScale = 0f;
+    return;
+}
 
 
         // =========================================================
@@ -632,26 +647,42 @@ if (wallJumpAirControlTimer > 0f)
 
         float horizontalInput =
             Input.GetAxisRaw("Horizontal");
+            
+
 
 
         // =========================================================
         // DÉCROCHAGE HORIZONTAL
         // =========================================================
 
-        bool movingAwayFromLeftWall =
-            isTouchingWallLeft &&
-            horizontalInput > 0;
+       // =========================================================
+// DÉCROCHAGE HORIZONTAL
+// =========================================================
 
-        bool movingAwayFromRightWall =
-            isTouchingWallRight &&
-            horizontalInput < 0;
+bool movingAwayFromLeftWall =
+    isTouchingWallLeft &&
+    horizontalInput > 0;
 
-        if (movingAwayFromLeftWall ||
-            movingAwayFromRightWall)
-        {
-            LeaveWall();
-            return;
-        }
+bool movingAwayFromRightWall =
+    isTouchingWallRight &&
+    horizontalInput < 0;
+
+if (movingAwayFromLeftWall ||
+    movingAwayFromRightWall)
+{
+    wallDetachTimer += Time.fixedDeltaTime;
+
+    if (wallDetachTimer >= wallDetachDelay)
+    {
+        LeaveWall();
+        wallDetachTimer = 0f;
+        return;
+    }
+}
+else
+{
+    wallDetachTimer = 0f;
+}
 
 
         // =========================================================
@@ -793,6 +824,53 @@ if (wallJumpAirControlTimer > 0f)
     return;
 }
 
+// =========================================================
+// WALL JUMP INERTIA
+// =========================================================
+
+if (wallJumpInertia)
+{
+    float horizontalInput = Input.GetAxisRaw("Horizontal");
+
+    // Direction opposée au mur
+    if (horizontalInput == wallJumpDirection)
+    {
+        rb.linearVelocity = new Vector2(
+            Mathf.MoveTowards(
+                rb.linearVelocity.x,
+                0f,
+                wallJumpInertiaDeceleration * Time.fixedDeltaTime
+            ),
+            rb.linearVelocity.y
+        );
+
+        return;
+    }
+    if (horizontalInput == 0)
+{
+    rb.linearVelocity = new Vector2(
+        Mathf.MoveTowards(
+            rb.linearVelocity.x,
+            0f,
+            wallJumpInertiaBrake * Time.fixedDeltaTime
+        ),
+        rb.linearVelocity.y
+    );
+
+    return;
+}
+// Direction vers le mur
+if (horizontalInput == -wallJumpDirection)
+{
+    rb.linearVelocity = new Vector2(
+        0f,
+        rb.linearVelocity.y
+    );
+
+    wallJumpInertia = false;
+    return;
+}
+}
 
         // =========================================================
         // DOUBLE JUMP BOOST
@@ -817,16 +895,11 @@ if (wallJumpAirControlTimer > 0f)
         // NORMAL MOVEMENT
         // =========================================================
 
-        float currentAirControl = 1f;
 
-if (wallJumpAirControlTimer > 0f)
-{
-    currentAirControl = wallJumpAirControl;
-}
 
 Vector3 targetVelocity =
     new Vector2(
-        horizontaleMovement * currentAirControl,
+        horizontaleMovement,
         rb.linearVelocity.y
     );
 
