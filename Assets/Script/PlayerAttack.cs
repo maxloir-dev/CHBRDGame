@@ -5,11 +5,13 @@ public class PlayerAttack : MonoBehaviour
     public int attackDamage = 2;
     public float attackRange = 1f;
     public LayerMask enemyLayer;
+    public Animator persoAnimator;
 
     void Update()
     {
         if (Input.GetButtonDown("Fire1"))
         {
+            persoAnimator.SetTrigger("Attaque");
             Attack();
         }
     }
@@ -52,4 +54,9 @@ else
 {
     Debug.Log("Aucun ennemi détecté");
 }
-    } }
+    } 
+    public void DealDamage()
+{
+    Attack();
+}
+}
